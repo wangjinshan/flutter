@@ -150,3 +150,8 @@ app.*.symbols
 .python-version
 .gclient_previous_custom_vars
 .gclient_previous_sync_commits
+
+# gclient sync generated folders
+_bad_scm/
+flutter/
+old_flutter_packages_flutter.git/
