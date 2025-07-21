@@ -38,6 +38,7 @@ import java.util.HashMap;
 
 /** Android implementation of the text input plugin. */
 public class TextInputPlugin implements ListenableEditingState.EditingStateWatcher {
+  // 🎯🎯🎯 [2025-07-22 最新版本标记] 蓝牙键盘坐标转换修复版本 🎯🎯🎯
   private static final String TAG = "TextInputPlugin";
 
   @NonNull private final View mView;
@@ -54,6 +55,7 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
   @NonNull private PlatformViewsController platformViewsController;
   @Nullable private Rect lastClientRect;
   @Nullable private Rect lastCursorRect;  // 存储从Flutter传递的真实光标位置
+  @Nullable private double[] lastTransformMatrix;  // 存储最新的变换矩阵
   private ImeSyncDeferringInsetsCallback imeSyncCallback;
 
   // Initialize the "last seen" text editing values to a non-null value.
@@ -543,6 +545,10 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
   }
 
   private void saveEditableSizeAndTransform(double width, double height, double[] matrix) {
+    // 🎯 [2025-07-22 LATEST VERSION] 保存变换矩阵供后续光标坐标转换使用
+    lastTransformMatrix = matrix.clone();
+    Log.w(TAG, "🎯 [LATEST-VERSION-2025-07-22] 变换矩阵已保存，准备用于光标坐标转换!");
+    
     final double[] minMax = new double[4]; // minX, maxX, minY, maxY.
     final boolean isAffine = matrix[3] == 0 && matrix[7] == 0 && matrix[15] == 1;
     minMax[0] = minMax[1] = matrix[12] / matrix[15]; // minX and maxX.
@@ -590,13 +596,18 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
     Log.w(TAG, "🎯 [关键] 原始Flutter坐标: left=" + left + ", top=" + top + ", width=" + width + ", height=" + height);
     Log.w(TAG, "🎯 [关键] 屏幕密度: " + density);
     
+    // 重要修复：应用变换矩阵将widget坐标转换为屏幕坐标
+    double[] transformedCoords = transformToScreenCoordinates(left, top, width, height);
+    
+    Log.w(TAG, "🎯 [修复] 应用变换矩阵后的坐标: left=" + transformedCoords[0] + ", top=" + transformedCoords[1] + ", width=" + transformedCoords[2] + ", height=" + transformedCoords[3]);
+    
     lastCursorRect = new Rect(
-        (int) (left * density),
-        (int) (top * density),
-        (int) ((left + width) * density),
-        (int) ((top + height) * density));
+        (int) (transformedCoords[0] * density),
+        (int) (transformedCoords[1] * density),
+        (int) ((transformedCoords[0] + transformedCoords[2]) * density),
+        (int) ((transformedCoords[1] + transformedCoords[3]) * density));
 
-    Log.w(TAG, "🎯 [关键] 转换后设备坐标: " + lastCursorRect.toString());
+    Log.w(TAG, "🎯 [关键] 最终设备坐标: " + lastCursorRect.toString());
     Log.w(TAG, "🎯 [关键] lastInputConnection类型: " + (lastInputConnection != null ? lastInputConnection.getClass().getSimpleName() : "null"));
 
     // 将光标位置传递给当前的InputConnection
@@ -606,6 +617,40 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
     } else {
       Log.w(TAG, "🎯 [关键] 无法传递光标位置 - InputConnection不是InputConnectionAdaptor类型");
     }
+  }
+
+  // 🎯 [2025-07-22 LATEST] 将Flutter widget坐标转换为屏幕坐标
+  private double[] transformToScreenCoordinates(double left, double top, double width, double height) {
+    if (lastTransformMatrix == null) {
+      Log.w(TAG, "🎯 [警告] 变换矩阵为null，使用原始坐标");
+      return new double[]{left, top, width, height};
+    }
+
+    final double[] matrix = lastTransformMatrix;
+    final boolean isAffine = matrix[3] == 0 && matrix[7] == 0 && matrix[15] == 1;
+    
+    Log.w(TAG, "🎯 [LATEST-2025-07-22] 应用变换矩阵:");
+    Log.w(TAG, "   原始坐标: (" + left + ", " + top + ") 大小: " + width + "x" + height);
+    Log.w(TAG, "   变换矩阵 isAffine: " + isAffine);
+    
+    // 变换左上角坐标 
+    final double w1 = isAffine ? 1 : 1 / (matrix[3] * left + matrix[7] * top + matrix[15]);
+    final double transformedLeft = (matrix[0] * left + matrix[4] * top + matrix[12]) * w1;
+    final double transformedTop = (matrix[1] * left + matrix[5] * top + matrix[13]) * w1;
+    
+    // 变换右下角坐标
+    final double right = left + width;
+    final double bottom = top + height;
+    final double w2 = isAffine ? 1 : 1 / (matrix[3] * right + matrix[7] * bottom + matrix[15]);
+    final double transformedRight = (matrix[0] * right + matrix[4] * bottom + matrix[12]) * w2;
+    final double transformedBottom = (matrix[1] * right + matrix[5] * bottom + matrix[13]) * w2;
+    
+    final double transformedWidth = transformedRight - transformedLeft;
+    final double transformedHeight = transformedBottom - transformedTop;
+    
+    Log.w(TAG, "   转换后坐标: (" + transformedLeft + ", " + transformedTop + ") 大小: " + transformedWidth + "x" + transformedHeight);
+    
+    return new double[]{transformedLeft, transformedTop, transformedWidth, transformedHeight};
   }
 
   @VisibleForTesting

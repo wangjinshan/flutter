@@ -4809,6 +4809,7 @@ class EditableTextState extends State<EditableText>
   // position the IME's candidate selection menu.
   //
   // See: [_updateComposingRectIfNeeded]
+  // 🎯🎯🎯 [2025-07-22 最新版本标记] 蓝牙键盘坐标转换修复版本 🎯🎯🎯
   void _updateCaretRectIfNeeded() {
     final TextSelection? selection = renderEditable.selection;
     if (selection == null || !selection.isValid) {
@@ -4832,9 +4833,10 @@ class EditableTextState extends State<EditableText>
         final TextPosition currentTextPosition = TextPosition(offset: currentSelection.start);
         final Rect localCaretRect = renderEditable.getLocalRectForCaret(currentTextPosition);
 
-        // Convert local coordinates to global screen coordinates for IME positioning
+        // 🎯 [LATEST-2025-07-22] 转换为全局屏幕坐标用于IME定位
         final RenderBox? renderBox = renderEditable as RenderBox?;
         if (renderBox != null && renderBox.hasSize) {
+          // 获取转换到屏幕的全局坐标
           final Offset globalOffset = renderBox.localToGlobal(localCaretRect.topLeft);
           final Rect globalCaretRect = Rect.fromLTWH(
             globalOffset.dx,
@@ -4843,9 +4845,12 @@ class EditableTextState extends State<EditableText>
             localCaretRect.height,
           );
 
+          // 发送全局坐标给Java层
           _textInputConnection!.setCaretRect(globalCaretRect);
+          print('🎯 [DART-2025-07-22] 发送光标坐标: 本地=$localCaretRect, 全局=$globalCaretRect');
         } else {
           _textInputConnection!.setCaretRect(localCaretRect);
+          print('🎯 [DART-2025-07-22] 发送光标坐标: 本地坐标=$localCaretRect');
         }
       } catch (e) {
         // Handle error silently to avoid affecting normal text input
