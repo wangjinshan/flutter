@@ -5,7 +5,7 @@
 package io.flutter.plugin.editing;
 
 import static io.flutter.Build.API_LEVELS;
-
+import android.graphics.Matrix;
 import android.annotation.TargetApi;
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -45,6 +45,7 @@ import java.util.Map;
 public class InputConnectionAdaptor extends BaseInputConnection
     implements ListenableEditingState.EditingStateWatcher {
   private static final String TAG = "InputConnectionAdaptor";
+  private static final String VERSION = "v7.0.0"; // 修正方案：等待真实坐标
 
   public interface KeyboardDelegate {
     public boolean handleEvent(@NonNull KeyEvent keyEvent);
@@ -65,6 +66,9 @@ public class InputConnectionAdaptor extends BaseInputConnection
   private FlutterTextUtils flutterTextUtils;
   private final KeyboardDelegate keyboardDelegate;
   private int batchEditNestDepth = 0;
+
+  // v7.0.0: 存储从Flutter接收的真实光标位置
+  private android.graphics.Rect mCursorRect = null;
 
   @SuppressWarnings("deprecation")
   public InputConnectionAdaptor(
@@ -119,6 +123,15 @@ public class InputConnectionAdaptor extends BaseInputConnection
         new FlutterJNI());
   }
 
+  /**
+   * v7.0.0: 设置从Flutter传递的真实光标位置
+   *
+   * @param rect 光标在屏幕上的真实位置矩形
+   */
+  public void setCursorRect(android.graphics.Rect rect) {
+    mCursorRect = rect;
+  }
+
   private ExtractedText getExtractedText(ExtractedTextRequest request) {
     mExtractedText.startOffset = 0;
     mExtractedText.partialStartOffset = -1;
@@ -133,22 +146,91 @@ public class InputConnectionAdaptor extends BaseInputConnection
   }
 
   private CursorAnchorInfo getCursorAnchorInfo() {
-    if (mCursorAnchorInfoBuilder == null) {
-      mCursorAnchorInfoBuilder = new CursorAnchorInfo.Builder();
-    } else {
+      if (mCursorAnchorInfoBuilder == null) {
+          mCursorAnchorInfoBuilder = new CursorAnchorInfo.Builder();
+      } else {
       mCursorAnchorInfoBuilder.reset();
     }
 
+    // Set selection range
     mCursorAnchorInfoBuilder.setSelectionRange(
-        mEditable.getSelectionStart(), mEditable.getSelectionEnd());
+        mEditable.getSelectionStart(),
+        mEditable.getSelectionEnd()
+    );
+
+    // Handle composing text
     final int composingStart = mEditable.getComposingStart();
     final int composingEnd = mEditable.getComposingEnd();
     if (composingStart >= 0 && composingEnd > composingStart) {
-      mCursorAnchorInfoBuilder.setComposingText(
-          composingStart, mEditable.toString().subSequence(composingStart, composingEnd));
+        mCursorAnchorInfoBuilder.setComposingText(
+            composingStart,
+            mEditable.toString().subSequence(composingStart, composingEnd)
+        );
     } else {
-      mCursorAnchorInfoBuilder.setComposingText(-1, "");
+        mCursorAnchorInfoBuilder.setComposingText(-1, "");
     }
+
+    try {
+        // Use real cursor position from Flutter if available
+        if (mCursorRect != null) {
+            // Get Flutter view's screen position
+            int[] viewLocationOnScreen = new int[2];
+            mFlutterView.getLocationOnScreen(viewLocationOnScreen);
+            float viewScreenX = viewLocationOnScreen[0];
+            float viewScreenY = viewLocationOnScreen[1];
+
+            // Calculate cursor position relative to Flutter view
+            float cursorRelativeX = mCursorRect.left - viewScreenX;
+            float cursorRelativeY = mCursorRect.top - viewScreenY;
+
+            // Set transformation matrix
+            Matrix transformMatrix = new Matrix();
+            transformMatrix.setTranslate(viewScreenX, viewScreenY);
+            mCursorAnchorInfoBuilder.setMatrix(transformMatrix);
+
+            // Set insertion marker location using real coordinates
+            mCursorAnchorInfoBuilder.setInsertionMarkerLocation(
+                cursorRelativeX,                     // X position (relative to view)
+                cursorRelativeY + mCursorRect.height(), // Bottom position
+                cursorRelativeY,                     // Top position
+                cursorRelativeY + mCursorRect.height() * 0.8f, // Baseline position
+                CursorAnchorInfo.FLAG_HAS_VISIBLE_REGION
+            );
+
+        } else {
+            // Fallback: use temporary position
+            int[] viewLocationOnScreen = new int[2];
+            mFlutterView.getLocationOnScreen(viewLocationOnScreen);
+            float viewScreenX = viewLocationOnScreen[0];
+            float viewScreenY = viewLocationOnScreen[1];
+
+            Matrix screenToViewMatrix = new Matrix();
+            screenToViewMatrix.setTranslate(viewScreenX, viewScreenY);
+            mCursorAnchorInfoBuilder.setMatrix(screenToViewMatrix);
+
+            // Temporary cursor position
+            float tempCursorX = 50f;
+            float tempCursorY = 50f;
+
+            mCursorAnchorInfoBuilder.setInsertionMarkerLocation(
+                tempCursorX,
+                tempCursorY + 20,
+                tempCursorY,
+                tempCursorY + 15,
+                CursorAnchorInfo.FLAG_HAS_VISIBLE_REGION
+            );
+        }
+
+    } catch (Exception e) {
+        // Fallback strategy: use identity matrix and default position
+        Matrix fallbackMatrix = new Matrix();
+        mCursorAnchorInfoBuilder.setMatrix(fallbackMatrix);
+
+        mCursorAnchorInfoBuilder.setInsertionMarkerLocation(
+            0f, 50f, 45f, 50f,
+            CursorAnchorInfo.FLAG_HAS_VISIBLE_REGION);
+    }
+
     return mCursorAnchorInfoBuilder.build();
   }
 
@@ -586,9 +668,16 @@ public class InputConnectionAdaptor extends BaseInputConnection
       mImm.updateExtractedText(
           mFlutterView, mExtractRequest.token, getExtractedText(mExtractRequest));
     }
+    
     if (mMonitorCursorUpdate) {
-      final CursorAnchorInfo info = getCursorAnchorInfo();
-      mImm.updateCursorAnchorInfo(mFlutterView, info);
+      // Delay cursor update to allow Flutter to provide latest cursor coordinates
+      mFlutterView.postDelayed(new Runnable() {
+        @Override
+        public void run() {
+          final CursorAnchorInfo info = getCursorAnchorInfo();
+          mImm.updateCursorAnchorInfo(mFlutterView, info);
+        }
+      }, 50);
     }
   }
   // -------- End: ListenableEditingState watcher implementation -------
