@@ -152,6 +152,11 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
           public void sendAppPrivateCommand(String action, Bundle data) {
             sendTextInputAppPrivateCommand(action, data);
           }
+
+          @Override
+          public void setCursorRect(double left, double top, double width, double height) {
+            setCursorRect((float) left, (float) top, (float) width, (float) height);
+          }
         });
 
     textInputChannel.requestExistingInputState();
@@ -544,6 +549,14 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
             (int) (minMax[2] * density),
             (int) Math.ceil(minMax[1] * density),
             (int) Math.ceil(minMax[3] * density));
+  }
+
+  private void setCursorRect(float left, float top, float width, float height) {
+    if (mLastInputConnection != null) {
+      android.graphics.Rect rect = new android.graphics.Rect(
+          (int) left, (int) top, (int) (left + width), (int) (top + height));
+      mLastInputConnection.setCursorRect(rect);
+    }
   }
 
   @VisibleForTesting

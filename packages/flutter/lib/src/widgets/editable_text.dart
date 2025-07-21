@@ -4784,8 +4784,22 @@ class EditableTextState extends State<EditableText>
       return;
     }
     final TextPosition currentTextPosition = TextPosition(offset: selection.start);
-    final Rect caretRect = renderEditable.getLocalRectForCaret(currentTextPosition);
-    _textInputConnection!.setCaretRect(caretRect);
+    final Rect localCaretRect = renderEditable.getLocalRectForCaret(currentTextPosition);
+
+    // Convert local coordinates to global screen coordinates for IME positioning
+    final RenderBox? renderBox = renderEditable as RenderBox?;
+    if (renderBox != null && renderBox.hasSize) {
+      final Offset globalOffset = renderBox.localToGlobal(localCaretRect.topLeft);
+      final Rect globalCaretRect = Rect.fromLTWH(
+        globalOffset.dx,
+        globalOffset.dy,
+        localCaretRect.width,
+        localCaretRect.height,
+      );
+      _textInputConnection!.setCaretRect(globalCaretRect);
+    } else {
+      _textInputConnection!.setCaretRect(localCaretRect);
+    }
   }
 
   TextDirection get _textDirection => widget.textDirection ?? Directionality.of(context);
