@@ -38,7 +38,6 @@ import java.util.HashMap;
 
 /** Android implementation of the text input plugin. */
 public class TextInputPlugin implements ListenableEditingState.EditingStateWatcher {
-  // 🎯🎯🎯 [2025-07-22 最新版本标记] 蓝牙键盘坐标转换修复版本 🎯🎯🎯
   private static final String TAG = "TextInputPlugin";
 
   @NonNull private final View mView;
@@ -299,23 +298,16 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
   @Nullable
   public InputConnection createInputConnection(
       @NonNull View view, @NonNull KeyboardManager keyboardManager, @NonNull EditorInfo outAttrs) {
-    Log.i(TAG, "🔍 [蓝牙键盘调试] createInputConnection called:");
-    Log.i(TAG, "   - inputTarget.type: " + (inputTarget != null ? inputTarget.type : "null"));
-    Log.i(TAG, "   - view.hasFocus(): " + view.hasFocus());
-    
     if (inputTarget.type == InputTarget.Type.NO_TARGET) {
-      Log.i(TAG, "   - NO_TARGET，返回null");
       lastInputConnection = null;
       return null;
     }
 
     if (inputTarget.type == InputTarget.Type.PHYSICAL_DISPLAY_PLATFORM_VIEW) {
-      Log.i(TAG, "   - PHYSICAL_DISPLAY_PLATFORM_VIEW，返回null");
       return null;
     }
 
     if (inputTarget.type == InputTarget.Type.VIRTUAL_DISPLAY_PLATFORM_VIEW) {
-      Log.i(TAG, "   - VIRTUAL_DISPLAY_PLATFORM_VIEW处理");
       if (isInputConnectionLocked) {
         return lastInputConnection;
       }
@@ -326,7 +318,6 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
       return lastInputConnection;
     }
 
-    Log.i(TAG, "   - 创建FRAMEWORK_CLIENT的InputConnection");
     outAttrs.inputType =
         inputTypeFromTextInputType(
             configuration.inputType,
@@ -385,8 +376,6 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
     outAttrs.initialSelEnd = mEditable.getSelectionEnd();
 
     lastInputConnection = connection;
-    Log.i(TAG, "   - InputConnection创建完成: " + connection);
-    Log.i(TAG, "   - 初始选择: start=" + outAttrs.initialSelStart + ", end=" + outAttrs.initialSelEnd);
     return lastInputConnection;
   }
 
@@ -419,28 +408,17 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
 
   @VisibleForTesting
   void showTextInput(View view) {
-    Log.i(TAG, "🔍 [蓝牙键盘调试] showTextInput called:");
-    Log.i(TAG, "   - view.hasFocus(): " + view.hasFocus());
-    Log.i(TAG, "   - configuration != null: " + (configuration != null));
-    Log.i(TAG, "   - inputTarget.type: " + (inputTarget != null ? inputTarget.type : "null"));
-    
     if (configuration == null
         || configuration.inputType == null
         || configuration.inputType.type != TextInputChannel.TextInputType.NONE) {
-      Log.i(TAG, "   - 请求焦点并显示软键盘");
       view.requestFocus();
       mImm.showSoftInput(view, 0);
     } else {
-      Log.i(TAG, "   - 隐藏文本输入");
       hideTextInput(view);
     }
   }
 
   private void hideTextInput(View view) {
-    Log.i(TAG, "🔍 [蓝牙键盘调试] hideTextInput called:");
-    Log.i(TAG, "   - view.hasFocus(): " + view.hasFocus());
-    Log.i(TAG, "   - 调用notifyViewExited()和hideSoftInputFromWindow()");
-    
     notifyViewExited();
     // Note: when a virtual display is used, a race condition may lead to us hiding the keyboard
     // here just after a platform view has shown it.
@@ -453,17 +431,10 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
 
   @VisibleForTesting
   void setTextInputClient(int client, TextInputChannel.Configuration configuration) {
-    Log.i(TAG, "🔍 [蓝牙键盘调试] setTextInputClient called:");
-    Log.i(TAG, "   - client: " + client);
-    Log.i(TAG, "   - configuration.inputType: " + (configuration.inputType != null ? configuration.inputType.type : "null"));
-    Log.i(TAG, "   - 旧inputTarget.type: " + (inputTarget != null ? inputTarget.type : "null"));
-    
     // Call notifyViewExited on the previous field.
     notifyViewExited();
     this.configuration = configuration;
     inputTarget = new InputTarget(InputTarget.Type.FRAMEWORK_CLIENT, client);
-    
-    Log.i(TAG, "   - 新inputTarget.type: " + inputTarget.type);
 
     mEditable.removeEditingStateListener(this);
     mEditable =
@@ -477,8 +448,6 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
     unlockPlatformViewInputConnection();
     lastClientRect = null;
     mEditable.addEditingStateListener(this);
-    
-    Log.i(TAG, "   - setTextInputClient完成，等待setTextInputEditingState调用");
   }
 
   private void setPlatformViewTextInputClient(int platformViewId, boolean usesVirtualDisplay) {
@@ -545,9 +514,7 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
   }
 
   private void saveEditableSizeAndTransform(double width, double height, double[] matrix) {
-    // 🎯 [2025-07-22 LATEST VERSION] 保存变换矩阵供后续光标坐标转换使用
     lastTransformMatrix = matrix.clone();
-    Log.w(TAG, "🎯 [LATEST-VERSION-2025-07-22] 变换矩阵已保存，准备用于光标坐标转换!");
     
     final double[] minMax = new double[4]; // minX, maxX, minY, maxY.
     final boolean isAffine = matrix[3] == 0 && matrix[7] == 0 && matrix[15] == 1;
@@ -592,14 +559,8 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
   private void saveCursorRect(double left, double top, double width, double height) {
     final Float density = mView.getContext().getResources().getDisplayMetrics().density;
     
-    Log.w(TAG, "🎯 [关键] saveCursorRect被调用!");
-    Log.w(TAG, "🎯 [关键] 原始Flutter坐标: left=" + left + ", top=" + top + ", width=" + width + ", height=" + height);
-    Log.w(TAG, "🎯 [关键] 屏幕密度: " + density);
-    
-    // 重要修复：应用变换矩阵将widget坐标转换为屏幕坐标
+    // Apply transformation matrix to convert widget coordinates to screen coordinates
     double[] transformedCoords = transformToScreenCoordinates(left, top, width, height);
-    
-    Log.w(TAG, "🎯 [修复] 应用变换矩阵后的坐标: left=" + transformedCoords[0] + ", top=" + transformedCoords[1] + ", width=" + transformedCoords[2] + ", height=" + transformedCoords[3]);
     
     lastCursorRect = new Rect(
         (int) (transformedCoords[0] * density),
@@ -607,31 +568,20 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
         (int) ((transformedCoords[0] + transformedCoords[2]) * density),
         (int) ((transformedCoords[1] + transformedCoords[3]) * density));
 
-    Log.w(TAG, "🎯 [关键] 最终设备坐标: " + lastCursorRect.toString());
-    Log.w(TAG, "🎯 [关键] lastInputConnection类型: " + (lastInputConnection != null ? lastInputConnection.getClass().getSimpleName() : "null"));
-
-    // 将光标位置传递给当前的InputConnection
+    // Pass cursor position to current InputConnection
     if (lastInputConnection instanceof InputConnectionAdaptor) {
-      Log.w(TAG, "🎯 [关键] 调用InputConnectionAdaptor.setCursorRect");
       ((InputConnectionAdaptor) lastInputConnection).setCursorRect(lastCursorRect);
-    } else {
-      Log.w(TAG, "🎯 [关键] 无法传递光标位置 - InputConnection不是InputConnectionAdaptor类型");
     }
   }
 
-  // 🎯 [2025-07-22 LATEST] 将Flutter widget坐标转换为屏幕坐标
+  // Convert Flutter widget coordinates to screen coordinates
   private double[] transformToScreenCoordinates(double left, double top, double width, double height) {
     if (lastTransformMatrix == null) {
-      Log.w(TAG, "🎯 [警告] 变换矩阵为null，使用原始坐标");
       return new double[]{left, top, width, height};
     }
 
     final double[] matrix = lastTransformMatrix;
     final boolean isAffine = matrix[3] == 0 && matrix[7] == 0 && matrix[15] == 1;
-    
-    Log.w(TAG, "🎯 [LATEST-2025-07-22] 应用变换矩阵:");
-    Log.w(TAG, "   原始坐标: (" + left + ", " + top + ") 大小: " + width + "x" + height);
-    Log.w(TAG, "   变换矩阵 isAffine: " + isAffine);
     
     // 变换左上角坐标 
     final double w1 = isAffine ? 1 : 1 / (matrix[3] * left + matrix[7] * top + matrix[15]);
@@ -647,8 +597,6 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
     
     final double transformedWidth = transformedRight - transformedLeft;
     final double transformedHeight = transformedBottom - transformedTop;
-    
-    Log.w(TAG, "   转换后坐标: (" + transformedLeft + ", " + transformedTop + ") 大小: " + transformedWidth + "x" + transformedHeight);
     
     return new double[]{transformedLeft, transformedTop, transformedWidth, transformedHeight};
   }

@@ -3793,17 +3793,10 @@ class EditableTextState extends State<EditableText>
   // Must be called after layout.
   // See https://github.com/flutter/flutter/issues/126312
   void _openInputConnection() {
-    debugPrint('🎯 [关键调试] _openInputConnection 被调用');
-    debugPrint('🎯 [关键调试] _shouldCreateInputConnection: $_shouldCreateInputConnection');
-    debugPrint('🎯 [关键调试] widget.readOnly: ${widget.readOnly}');
-    debugPrint('🎯 [关键调试] _hasInputConnection: $_hasInputConnection');
-
     if (!_shouldCreateInputConnection) {
-      debugPrint('🎯 [关键调试] _shouldCreateInputConnection为false，不创建输入连接');
       return;
     }
     if (!_hasInputConnection) {
-      debugPrint('🎯 [关键调试] 开始创建输入连接...');
       final TextEditingValue localValue = _value;
 
       // When _needsAutofill == true && currentAutofillScope == null, autofill
@@ -3818,11 +3811,8 @@ class EditableTextState extends State<EditableText>
           _needsAutofill && currentAutofillScope != null
               ? currentAutofillScope!.attach(this, _effectiveAutofillClient.textInputConfiguration)
               : TextInput.attach(this, _effectiveAutofillClient.textInputConfiguration);
-      debugPrint('🎯 [关键调试] 输入连接创建完成: ${_textInputConnection != null}');
-      debugPrint('🎯 [关键调试] 输入连接attached: ${_textInputConnection?.attached}');
       _updateSizeAndTransform();
       _schedulePeriodicPostFrameCallbacks();
-      debugPrint('🎯 [关键调试] _schedulePeriodicPostFrameCallbacks已调用');
       _textInputConnection!
         ..setStyle(
           fontFamily: _style.fontFamily,
@@ -3857,17 +3847,7 @@ class EditableTextState extends State<EditableText>
   void _openOrCloseInputConnectionIfNeeded() {
     final bool hasKeyboardToken = widget.focusNode.consumeKeyboardToken();
 
-    // DEBUG: 添加详细日志来调试蓝牙键盘问题
-    print('🔍 [EditableText Debug] _openOrCloseInputConnectionIfNeeded:');
-    print('   - _hasFocus: $_hasFocus');
-    print('   - hasKeyboardToken: $hasKeyboardToken');
-
-    // FIXME: 临时修改 - 强制建立连接以测试假设（不管keyboard token状态）
-    bool shouldOpenConnection = _hasFocus; // 简单测试：只要有焦点就建立连接
-
-    print('   - shouldOpenConnection: $shouldOpenConnection (强制测试模式)');
-
-    if (shouldOpenConnection) {
+    if (_hasFocus && (widget.readOnly || hasKeyboardToken)) {
       _openInputConnection();
     } else if (!_hasFocus) {
       _closeInputConnectionIfNeeded();
@@ -4809,53 +4789,34 @@ class EditableTextState extends State<EditableText>
   // position the IME's candidate selection menu.
   //
   // See: [_updateComposingRectIfNeeded]
-  // 🎯🎯🎯 [2025-07-22 最新版本标记] 蓝牙键盘坐标转换修复版本 🎯🎯🎯
   void _updateCaretRectIfNeeded() {
     final TextSelection? selection = renderEditable.selection;
     if (selection == null || !selection.isValid) {
       return;
     }
 
-    // 延迟到下一帧获取光标位置，确保布局已经完成
-    SchedulerBinding.instance.addPostFrameCallback((timeStamp) {
-      // 再次检查连接状态，因为这是异步调用
-      if (_textInputConnection == null || !_textInputConnection!.attached) {
-        return;
+    try {
+      final TextPosition textPosition = TextPosition(offset: selection.start);
+      final Rect localCaretRect = renderEditable.getLocalRectForCaret(textPosition);
+
+      // Convert local coordinates to global screen coordinates for IME positioning
+      final RenderBox? renderBox = renderEditable as RenderBox?;
+      if (renderBox != null && renderBox.hasSize) {
+        final Offset globalOffset = renderBox.localToGlobal(localCaretRect.topLeft);
+        final Rect globalCaretRect = Rect.fromLTWH(
+          globalOffset.dx,
+          globalOffset.dy,
+          localCaretRect.width,
+          localCaretRect.height,
+        );
+
+        _textInputConnection!.setCaretRect(globalCaretRect);
+      } else {
+        _textInputConnection!.setCaretRect(localCaretRect);
       }
-
-      // 获取当前选择位置（可能已经变化）
-      final TextSelection? currentSelection = renderEditable.selection;
-      if (currentSelection == null || !currentSelection.isValid) {
-        return;
-      }
-
-      try {
-        final TextPosition currentTextPosition = TextPosition(offset: currentSelection.start);
-        final Rect localCaretRect = renderEditable.getLocalRectForCaret(currentTextPosition);
-
-        // 🎯 [LATEST-2025-07-22] 转换为全局屏幕坐标用于IME定位
-        final RenderBox? renderBox = renderEditable as RenderBox?;
-        if (renderBox != null && renderBox.hasSize) {
-          // 获取转换到屏幕的全局坐标
-          final Offset globalOffset = renderBox.localToGlobal(localCaretRect.topLeft);
-          final Rect globalCaretRect = Rect.fromLTWH(
-            globalOffset.dx,
-            globalOffset.dy,
-            localCaretRect.width,
-            localCaretRect.height,
-          );
-
-          // 发送全局坐标给Java层
-          _textInputConnection!.setCaretRect(globalCaretRect);
-          print('🎯 [DART-2025-07-22] 发送光标坐标: 本地=$localCaretRect, 全局=$globalCaretRect');
-        } else {
-          _textInputConnection!.setCaretRect(localCaretRect);
-          print('🎯 [DART-2025-07-22] 发送光标坐标: 本地坐标=$localCaretRect');
-        }
-      } catch (e) {
-        // Handle error silently to avoid affecting normal text input
-      }
-    });
+    } catch (e) {
+      // Handle error silently to avoid affecting normal text input
+    }
   }
 
   TextDirection get _textDirection => widget.textDirection ?? Directionality.of(context);

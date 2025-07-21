@@ -123,9 +123,7 @@ public class InputConnectionAdaptor extends BaseInputConnection
         return;
       }
 
-      Log.i(TAG, "主动计算光标位置，当前光标: " + cursorPos + ", 文本长度: " + mEditable.length());
-
-      // 基于当前光标位置和字体大小计算屏幕坐标
+      // Calculate screen coordinates based on current cursor position and font size
       int[] viewLocationOnScreen = new int[2];
       mFlutterView.getLocationOnScreen(viewLocationOnScreen);
 
@@ -144,13 +142,11 @@ public class InputConnectionAdaptor extends BaseInputConnection
           (int)(viewLocationOnScreen[1] + estimatedY + lineHeight)
       );
 
-      // 设置计算得到的光标位置
+      // Set calculated cursor position
       mCursorRect = estimatedRect;
 
-      Log.i(TAG, "计算得到光标位置: " + mCursorRect.toString());
-
     } catch (Exception e) {
-      Log.e(TAG, "计算光标位置出错: " + e.getMessage());
+      // Ignore cursor calculation errors silently
     }
   }
 
