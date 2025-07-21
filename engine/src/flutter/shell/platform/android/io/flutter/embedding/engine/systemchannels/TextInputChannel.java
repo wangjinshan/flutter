@@ -126,6 +126,34 @@ public class TextInputChannel {
                 result.error("error", exception.getMessage(), null);
               }
               break;
+            case "TextInput.setCursorRect":
+              try {
+                final JSONObject arguments = (JSONObject) args;
+                final double left = arguments.getDouble("x");
+                final double top = arguments.getDouble("y");
+                final double width = arguments.getDouble("width");
+                final double height = arguments.getDouble("height");
+
+                textInputMethodHandler.setCursorRect(left, top, width, height);
+                result.success(null);
+              } catch (JSONException exception) {
+                result.error("error", exception.getMessage(), null);
+              }
+              break;
+            case "TextInput.setCaretRect":
+              try {
+                final JSONObject arguments = (JSONObject) args;
+                final double left = arguments.getDouble("x");
+                final double top = arguments.getDouble("y");
+                final double width = arguments.getDouble("width");
+                final double height = arguments.getDouble("height");
+
+                textInputMethodHandler.setCursorRect(left, top, width, height);
+                result.success(null);
+              } catch (JSONException exception) {
+                result.error("error", exception.getMessage(), null);
+              }
+              break;
             case "TextInput.clearClient":
               textInputMethodHandler.clearClient();
               result.success(null);
@@ -149,20 +177,6 @@ public class TextInputChannel {
             case "TextInput.finishAutofillContext":
               textInputMethodHandler.finishAutofillContext((boolean) args);
               result.success(null);
-              break;
-            case "TextInput.setCaretRect":
-              try {
-                final JSONObject arguments = (JSONObject) args;
-                final double left = arguments.getDouble("x");
-                final double top = arguments.getDouble("y");
-                final double width = arguments.getDouble("width");
-                final double height = arguments.getDouble("height");
-                
-                textInputMethodHandler.setCursorRect(left, top, width, height);
-                result.success(null);
-              } catch (JSONException exception) {
-                result.error("error", exception.getMessage(), null);
-              }
               break;
             default:
               result.notImplemented();
@@ -443,6 +457,19 @@ public class TextInputChannel {
      */
     void setEditableSizeAndTransform(double width, double height, @NonNull double[] transform);
 
+    /**
+     * Sets the cursor rectangle in the current text input client.
+     *
+     * <p>This method receives the actual cursor position from Flutter's rendering system
+     * to provide accurate cursor coordinates for the input method framework.
+     *
+     * @param left the left coordinate of the cursor rectangle in screen coordinates
+     * @param top the top coordinate of the cursor rectangle in screen coordinates
+     * @param width the width of the cursor rectangle
+     * @param height the height of the cursor rectangle
+     */
+    void setCursorRect(double left, double top, double width, double height);
+
     // TODO(mattcarroll): javadoc
     void setEditingState(@NonNull TextEditState editingState);
 
@@ -459,16 +486,6 @@ public class TextInputChannel {
      * @param data Any data to include with the command.
      */
     void sendAppPrivateCommand(@NonNull String action, @NonNull Bundle data);
-
-    /**
-     * Sets the cursor rectangle for IME positioning (Bluetooth keyboard support).
-     *
-     * @param left The left coordinate of the cursor rectangle in global screen coordinates.
-     * @param top The top coordinate of the cursor rectangle in global screen coordinates.  
-     * @param width The width of the cursor rectangle.
-     * @param height The height of the cursor rectangle.
-     */
-    void setCursorRect(double left, double top, double width, double height);
   }
 
   /** A text editing configuration. */

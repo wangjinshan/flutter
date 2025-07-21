@@ -104,6 +104,56 @@ public class InputConnectionAdaptor extends BaseInputConnection
     mImm = (InputMethodManager) view.getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
   }
 
+  /**
+   * v7.0.0: 设置从Flutter传递的真实光标位置
+   *
+   * @param rect 光标在屏幕上的真实位置矩形
+   */
+  public void setCursorRect(android.graphics.Rect rect) {
+    mCursorRect = rect;
+  }
+
+  /**
+   * v7.1.0: 在文本提交后主动计算光标位置（蓝牙键盘支持）
+   */
+  private void calculateAndSetCursorPosition() {
+    try {
+      int cursorPos = Selection.getSelectionStart(mEditable);
+      if (cursorPos < 0) {
+        return;
+      }
+
+      Log.i(TAG, "主动计算光标位置，当前光标: " + cursorPos + ", 文本长度: " + mEditable.length());
+
+      // 基于当前光标位置和字体大小计算屏幕坐标
+      int[] viewLocationOnScreen = new int[2];
+      mFlutterView.getLocationOnScreen(viewLocationOnScreen);
+
+      // 简化的位置计算：基于字符位置估算坐标
+      float characterWidth = 20f; // 假设每个字符20像素宽
+      float lineHeight = 40f;     // 假设行高40像素
+
+      float estimatedX = cursorPos * characterWidth;
+      float estimatedY = lineHeight;
+
+      // 创建估算的光标矩形
+      android.graphics.Rect estimatedRect = new android.graphics.Rect(
+          (int)(viewLocationOnScreen[0] + estimatedX),
+          (int)(viewLocationOnScreen[1] + estimatedY),
+          (int)(viewLocationOnScreen[0] + estimatedX + 2),
+          (int)(viewLocationOnScreen[1] + estimatedY + lineHeight)
+      );
+
+      // 设置计算得到的光标位置
+      mCursorRect = estimatedRect;
+
+      Log.i(TAG, "计算得到光标位置: " + mCursorRect.toString());
+
+    } catch (Exception e) {
+      Log.e(TAG, "计算光标位置出错: " + e.getMessage());
+    }
+  }
+
   public InputConnectionAdaptor(
       View view,
       int client,
@@ -121,15 +171,6 @@ public class InputConnectionAdaptor extends BaseInputConnection
         editable,
         editorInfo,
         new FlutterJNI());
-  }
-
-  /**
-   * v7.0.0: 设置从Flutter传递的真实光标位置
-   *
-   * @param rect 光标在屏幕上的真实位置矩形
-   */
-  public void setCursorRect(android.graphics.Rect rect) {
-    mCursorRect = rect;
   }
 
   private ExtractedText getExtractedText(ExtractedTextRequest request) {
@@ -257,6 +298,13 @@ public class InputConnectionAdaptor extends BaseInputConnection
   @Override
   public boolean commitText(CharSequence text, int newCursorPosition) {
     final boolean result = super.commitText(text, newCursorPosition);
+
+    // v7.0.0: 不再使用估算坐标，而是等待Flutter传递真实坐标
+    // Calculate cursor position for IME candidate positioning (Bluetooth keyboard support)
+    // if (result) {
+    //   calculateAndSetCursorPosition();
+    // }
+
     return result;
   }
 
@@ -292,6 +340,13 @@ public class InputConnectionAdaptor extends BaseInputConnection
       result = super.setComposingText(text, newCursorPosition);
     }
     endBatchEdit();
+
+    // v7.0.0: 不再使用估算坐标，而是等待Flutter传递真实坐标
+    // Calculate cursor position for IME candidate positioning (Bluetooth keyboard support)
+    // if (result) {
+    //   calculateAndSetCursorPosition();
+    // }
+
     return result;
   }
 
@@ -324,13 +379,7 @@ public class InputConnectionAdaptor extends BaseInputConnection
       mImm.updateCursorAnchorInfo(mFlutterView, getCursorAnchorInfo());
     }
 
-    final boolean updated = (cursorUpdateMode & CURSOR_UPDATE_MONITOR) != 0;
-    if (updated != mMonitorCursorUpdate) {
-      Log.d(TAG, "The input method toggled cursor monitoring " + (updated ? "on" : "off"));
-    }
-
-    // Enables cursor monitoring. See InputConnectionAdaptor#didChangeEditingState.
-    mMonitorCursorUpdate = updated;
+    mMonitorCursorUpdate = (cursorUpdateMode & CURSOR_UPDATE_MONITOR) != 0;
     return true;
   }
 
@@ -354,6 +403,13 @@ public class InputConnectionAdaptor extends BaseInputConnection
     beginBatchEdit();
     boolean result = super.setSelection(start, end);
     endBatchEdit();
+
+    // v7.0.0: 不再使用估算坐标，而是等待Flutter传递真实坐标
+    // Calculate cursor position for IME candidate positioning (Bluetooth keyboard support)
+    // if (result) {
+    //   calculateAndSetCursorPosition();
+    // }
+
     return result;
   }
 
@@ -649,14 +705,7 @@ public class InputConnectionAdaptor extends BaseInputConnection
   @Override
   public void didChangeEditingState(
       boolean textChanged, boolean selectionChanged, boolean composingRegionChanged) {
-    // This method notifies the input method that the editing state has changed.
-    // updateSelection is mandatory. updateExtractedText and updateCursorAnchorInfo
-    // are on demand (if the input method set the correspoinding monitoring
-    // flags). See getExtractedText and requestCursorUpdates.
-
-    // Always send selection update. InputMethodManager#updateSelection skips
-    // sending the message if none of the parameters have changed since the last
-    // time we called it.
+    // Always send selection update
     mImm.updateSelection(
         mFlutterView,
         mEditable.getSelectionStart(),

@@ -53,6 +53,7 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
   @Nullable private InputConnection lastInputConnection;
   @NonNull private PlatformViewsController platformViewsController;
   @Nullable private Rect lastClientRect;
+  @Nullable private Rect lastCursorRect;  // 存储从Flutter传递的真实光标位置
   private ImeSyncDeferringInsetsCallback imeSyncCallback;
 
   // Initialize the "last seen" text editing values to a non-null value.
@@ -144,6 +145,11 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
           }
 
           @Override
+          public void setCursorRect(double left, double top, double width, double height) {
+            saveCursorRect(left, top, width, height);
+          }
+
+          @Override
           public void clearClient() {
             clearTextInputClient();
           }
@@ -151,11 +157,6 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
           @Override
           public void sendAppPrivateCommand(String action, Bundle data) {
             sendTextInputAppPrivateCommand(action, data);
-          }
-
-          @Override
-          public void setCursorRect(double left, double top, double width, double height) {
-            setCursorRect((float) left, (float) top, (float) width, (float) height);
           }
         });
 
@@ -296,16 +297,23 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
   @Nullable
   public InputConnection createInputConnection(
       @NonNull View view, @NonNull KeyboardManager keyboardManager, @NonNull EditorInfo outAttrs) {
+    Log.i(TAG, "🔍 [蓝牙键盘调试] createInputConnection called:");
+    Log.i(TAG, "   - inputTarget.type: " + (inputTarget != null ? inputTarget.type : "null"));
+    Log.i(TAG, "   - view.hasFocus(): " + view.hasFocus());
+    
     if (inputTarget.type == InputTarget.Type.NO_TARGET) {
+      Log.i(TAG, "   - NO_TARGET，返回null");
       lastInputConnection = null;
       return null;
     }
 
     if (inputTarget.type == InputTarget.Type.PHYSICAL_DISPLAY_PLATFORM_VIEW) {
+      Log.i(TAG, "   - PHYSICAL_DISPLAY_PLATFORM_VIEW，返回null");
       return null;
     }
 
     if (inputTarget.type == InputTarget.Type.VIRTUAL_DISPLAY_PLATFORM_VIEW) {
+      Log.i(TAG, "   - VIRTUAL_DISPLAY_PLATFORM_VIEW处理");
       if (isInputConnectionLocked) {
         return lastInputConnection;
       }
@@ -316,6 +324,7 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
       return lastInputConnection;
     }
 
+    Log.i(TAG, "   - 创建FRAMEWORK_CLIENT的InputConnection");
     outAttrs.inputType =
         inputTypeFromTextInputType(
             configuration.inputType,
@@ -374,6 +383,8 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
     outAttrs.initialSelEnd = mEditable.getSelectionEnd();
 
     lastInputConnection = connection;
+    Log.i(TAG, "   - InputConnection创建完成: " + connection);
+    Log.i(TAG, "   - 初始选择: start=" + outAttrs.initialSelStart + ", end=" + outAttrs.initialSelEnd);
     return lastInputConnection;
   }
 
@@ -406,17 +417,28 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
 
   @VisibleForTesting
   void showTextInput(View view) {
+    Log.i(TAG, "🔍 [蓝牙键盘调试] showTextInput called:");
+    Log.i(TAG, "   - view.hasFocus(): " + view.hasFocus());
+    Log.i(TAG, "   - configuration != null: " + (configuration != null));
+    Log.i(TAG, "   - inputTarget.type: " + (inputTarget != null ? inputTarget.type : "null"));
+    
     if (configuration == null
         || configuration.inputType == null
         || configuration.inputType.type != TextInputChannel.TextInputType.NONE) {
+      Log.i(TAG, "   - 请求焦点并显示软键盘");
       view.requestFocus();
       mImm.showSoftInput(view, 0);
     } else {
+      Log.i(TAG, "   - 隐藏文本输入");
       hideTextInput(view);
     }
   }
 
   private void hideTextInput(View view) {
+    Log.i(TAG, "🔍 [蓝牙键盘调试] hideTextInput called:");
+    Log.i(TAG, "   - view.hasFocus(): " + view.hasFocus());
+    Log.i(TAG, "   - 调用notifyViewExited()和hideSoftInputFromWindow()");
+    
     notifyViewExited();
     // Note: when a virtual display is used, a race condition may lead to us hiding the keyboard
     // here just after a platform view has shown it.
@@ -429,10 +451,17 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
 
   @VisibleForTesting
   void setTextInputClient(int client, TextInputChannel.Configuration configuration) {
+    Log.i(TAG, "🔍 [蓝牙键盘调试] setTextInputClient called:");
+    Log.i(TAG, "   - client: " + client);
+    Log.i(TAG, "   - configuration.inputType: " + (configuration.inputType != null ? configuration.inputType.type : "null"));
+    Log.i(TAG, "   - 旧inputTarget.type: " + (inputTarget != null ? inputTarget.type : "null"));
+    
     // Call notifyViewExited on the previous field.
     notifyViewExited();
     this.configuration = configuration;
     inputTarget = new InputTarget(InputTarget.Type.FRAMEWORK_CLIENT, client);
+    
+    Log.i(TAG, "   - 新inputTarget.type: " + inputTarget.type);
 
     mEditable.removeEditingStateListener(this);
     mEditable =
@@ -446,6 +475,8 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
     unlockPlatformViewInputConnection();
     lastClientRect = null;
     mEditable.addEditingStateListener(this);
+    
+    Log.i(TAG, "   - setTextInputClient完成，等待setTextInputEditingState调用");
   }
 
   private void setPlatformViewTextInputClient(int platformViewId, boolean usesVirtualDisplay) {
@@ -551,11 +582,29 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
             (int) Math.ceil(minMax[3] * density));
   }
 
-  private void setCursorRect(float left, float top, float width, float height) {
-    if (mLastInputConnection != null) {
-      android.graphics.Rect rect = new android.graphics.Rect(
-          (int) left, (int) top, (int) (left + width), (int) (top + height));
-      mLastInputConnection.setCursorRect(rect);
+  // 保存从Flutter传递的真实光标位置
+  private void saveCursorRect(double left, double top, double width, double height) {
+    final Float density = mView.getContext().getResources().getDisplayMetrics().density;
+    
+    Log.w(TAG, "🎯 [关键] saveCursorRect被调用!");
+    Log.w(TAG, "🎯 [关键] 原始Flutter坐标: left=" + left + ", top=" + top + ", width=" + width + ", height=" + height);
+    Log.w(TAG, "🎯 [关键] 屏幕密度: " + density);
+    
+    lastCursorRect = new Rect(
+        (int) (left * density),
+        (int) (top * density),
+        (int) ((left + width) * density),
+        (int) ((top + height) * density));
+
+    Log.w(TAG, "🎯 [关键] 转换后设备坐标: " + lastCursorRect.toString());
+    Log.w(TAG, "🎯 [关键] lastInputConnection类型: " + (lastInputConnection != null ? lastInputConnection.getClass().getSimpleName() : "null"));
+
+    // 将光标位置传递给当前的InputConnection
+    if (lastInputConnection instanceof InputConnectionAdaptor) {
+      Log.w(TAG, "🎯 [关键] 调用InputConnectionAdaptor.setCursorRect");
+      ((InputConnectionAdaptor) lastInputConnection).setCursorRect(lastCursorRect);
+    } else {
+      Log.w(TAG, "🎯 [关键] 无法传递光标位置 - InputConnection不是InputConnectionAdaptor类型");
     }
   }
 
