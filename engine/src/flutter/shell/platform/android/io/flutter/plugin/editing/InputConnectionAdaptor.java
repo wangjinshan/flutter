@@ -45,7 +45,6 @@ import java.util.Map;
 public class InputConnectionAdaptor extends BaseInputConnection
     implements ListenableEditingState.EditingStateWatcher {
   private static final String TAG = "InputConnectionAdaptor";
-  private static final String VERSION = "v7.0.0"; // 修正方案：等待真实坐标
 
   public interface KeyboardDelegate {
     public boolean handleEvent(@NonNull KeyEvent keyEvent);
@@ -67,7 +66,6 @@ public class InputConnectionAdaptor extends BaseInputConnection
   private final KeyboardDelegate keyboardDelegate;
   private int batchEditNestDepth = 0;
 
-  // v7.0.0: 存储从Flutter接收的真实光标位置
   private android.graphics.Rect mCursorRect = null;
 
   @SuppressWarnings("deprecation")
@@ -104,50 +102,8 @@ public class InputConnectionAdaptor extends BaseInputConnection
     mImm = (InputMethodManager) view.getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
   }
 
-  /**
-   * v7.0.0: 设置从Flutter传递的真实光标位置
-   *
-   * @param rect 光标在屏幕上的真实位置矩形
-   */
   public void setCursorRect(android.graphics.Rect rect) {
     mCursorRect = rect;
-  }
-
-  /**
-   * v7.1.0: 在文本提交后主动计算光标位置（蓝牙键盘支持）
-   */
-  private void calculateAndSetCursorPosition() {
-    try {
-      int cursorPos = Selection.getSelectionStart(mEditable);
-      if (cursorPos < 0) {
-        return;
-      }
-
-      // Calculate screen coordinates based on current cursor position and font size
-      int[] viewLocationOnScreen = new int[2];
-      mFlutterView.getLocationOnScreen(viewLocationOnScreen);
-
-      // 简化的位置计算：基于字符位置估算坐标
-      float characterWidth = 20f; // 假设每个字符20像素宽
-      float lineHeight = 40f;     // 假设行高40像素
-
-      float estimatedX = cursorPos * characterWidth;
-      float estimatedY = lineHeight;
-
-      // 创建估算的光标矩形
-      android.graphics.Rect estimatedRect = new android.graphics.Rect(
-          (int)(viewLocationOnScreen[0] + estimatedX),
-          (int)(viewLocationOnScreen[1] + estimatedY),
-          (int)(viewLocationOnScreen[0] + estimatedX + 2),
-          (int)(viewLocationOnScreen[1] + estimatedY + lineHeight)
-      );
-
-      // Set calculated cursor position
-      mCursorRect = estimatedRect;
-
-    } catch (Exception e) {
-      // Ignore cursor calculation errors silently
-    }
   }
 
   public InputConnectionAdaptor(
@@ -183,89 +139,41 @@ public class InputConnectionAdaptor extends BaseInputConnection
   }
 
   private CursorAnchorInfo getCursorAnchorInfo() {
-      if (mCursorAnchorInfoBuilder == null) {
-          mCursorAnchorInfoBuilder = new CursorAnchorInfo.Builder();
-      } else {
+    if (mCursorAnchorInfoBuilder == null) {
+      mCursorAnchorInfoBuilder = new CursorAnchorInfo.Builder();
+    } else {
       mCursorAnchorInfoBuilder.reset();
     }
 
-    // Set selection range
     mCursorAnchorInfoBuilder.setSelectionRange(
-        mEditable.getSelectionStart(),
-        mEditable.getSelectionEnd()
-    );
+        mEditable.getSelectionStart(), mEditable.getSelectionEnd());
 
-    // Handle composing text
     final int composingStart = mEditable.getComposingStart();
     final int composingEnd = mEditable.getComposingEnd();
     if (composingStart >= 0 && composingEnd > composingStart) {
-        mCursorAnchorInfoBuilder.setComposingText(
-            composingStart,
-            mEditable.toString().subSequence(composingStart, composingEnd)
-        );
+      mCursorAnchorInfoBuilder.setComposingText(
+          composingStart, mEditable.toString().subSequence(composingStart, composingEnd));
     } else {
-        mCursorAnchorInfoBuilder.setComposingText(-1, "");
+      mCursorAnchorInfoBuilder.setComposingText(-1, "");
     }
 
-    try {
-        // Use real cursor position from Flutter if available
-        if (mCursorRect != null) {
-            // Get Flutter view's screen position
-            int[] viewLocationOnScreen = new int[2];
-            mFlutterView.getLocationOnScreen(viewLocationOnScreen);
-            float viewScreenX = viewLocationOnScreen[0];
-            float viewScreenY = viewLocationOnScreen[1];
+    if (mCursorRect != null) {
+      int[] viewLocationOnScreen = new int[2];
+      mFlutterView.getLocationOnScreen(viewLocationOnScreen);
+      
+      Matrix transformMatrix = new Matrix();
+      transformMatrix.setTranslate(viewLocationOnScreen[0], viewLocationOnScreen[1]);
+      mCursorAnchorInfoBuilder.setMatrix(transformMatrix);
 
-            // Calculate cursor position relative to Flutter view
-            float cursorRelativeX = mCursorRect.left - viewScreenX;
-            float cursorRelativeY = mCursorRect.top - viewScreenY;
+      float cursorRelativeX = mCursorRect.left - viewLocationOnScreen[0];
+      float cursorRelativeY = mCursorRect.top - viewLocationOnScreen[1];
 
-            // Set transformation matrix
-            Matrix transformMatrix = new Matrix();
-            transformMatrix.setTranslate(viewScreenX, viewScreenY);
-            mCursorAnchorInfoBuilder.setMatrix(transformMatrix);
-
-            // Set insertion marker location using real coordinates
-            mCursorAnchorInfoBuilder.setInsertionMarkerLocation(
-                cursorRelativeX,                     // X position (relative to view)
-                cursorRelativeY + mCursorRect.height(), // Bottom position
-                cursorRelativeY,                     // Top position
-                cursorRelativeY + mCursorRect.height() * 0.8f, // Baseline position
-                CursorAnchorInfo.FLAG_HAS_VISIBLE_REGION
-            );
-
-        } else {
-            // Fallback: use temporary position
-            int[] viewLocationOnScreen = new int[2];
-            mFlutterView.getLocationOnScreen(viewLocationOnScreen);
-            float viewScreenX = viewLocationOnScreen[0];
-            float viewScreenY = viewLocationOnScreen[1];
-
-            Matrix screenToViewMatrix = new Matrix();
-            screenToViewMatrix.setTranslate(viewScreenX, viewScreenY);
-            mCursorAnchorInfoBuilder.setMatrix(screenToViewMatrix);
-
-            // Temporary cursor position
-            float tempCursorX = 50f;
-            float tempCursorY = 50f;
-
-            mCursorAnchorInfoBuilder.setInsertionMarkerLocation(
-                tempCursorX,
-                tempCursorY + 20,
-                tempCursorY,
-                tempCursorY + 15,
-                CursorAnchorInfo.FLAG_HAS_VISIBLE_REGION
-            );
-        }
-
-    } catch (Exception e) {
-        // Fallback strategy: use identity matrix and default position
-        Matrix fallbackMatrix = new Matrix();
-        mCursorAnchorInfoBuilder.setMatrix(fallbackMatrix);
-
-        mCursorAnchorInfoBuilder.setInsertionMarkerLocation(
-            0f, 50f, 45f, 50f,
-            CursorAnchorInfo.FLAG_HAS_VISIBLE_REGION);
+      mCursorAnchorInfoBuilder.setInsertionMarkerLocation(
+          cursorRelativeX,
+          cursorRelativeY + mCursorRect.height(),
+          cursorRelativeY,
+          cursorRelativeY + mCursorRect.height() * 0.8f,
+          CursorAnchorInfo.FLAG_HAS_VISIBLE_REGION);
     }
 
     return mCursorAnchorInfoBuilder.build();
@@ -293,15 +201,7 @@ public class InputConnectionAdaptor extends BaseInputConnection
 
   @Override
   public boolean commitText(CharSequence text, int newCursorPosition) {
-    final boolean result = super.commitText(text, newCursorPosition);
-
-    // v7.0.0: 不再使用估算坐标，而是等待Flutter传递真实坐标
-    // Calculate cursor position for IME candidate positioning (Bluetooth keyboard support)
-    // if (result) {
-    //   calculateAndSetCursorPosition();
-    // }
-
-    return result;
+    return super.commitText(text, newCursorPosition);
   }
 
   @Override
@@ -336,13 +236,6 @@ public class InputConnectionAdaptor extends BaseInputConnection
       result = super.setComposingText(text, newCursorPosition);
     }
     endBatchEdit();
-
-    // v7.0.0: 不再使用估算坐标，而是等待Flutter传递真实坐标
-    // Calculate cursor position for IME candidate positioning (Bluetooth keyboard support)
-    // if (result) {
-    //   calculateAndSetCursorPosition();
-    // }
-
     return result;
   }
 
@@ -399,13 +292,6 @@ public class InputConnectionAdaptor extends BaseInputConnection
     beginBatchEdit();
     boolean result = super.setSelection(start, end);
     endBatchEdit();
-
-    // v7.0.0: 不再使用估算坐标，而是等待Flutter传递真实坐标
-    // Calculate cursor position for IME candidate positioning (Bluetooth keyboard support)
-    // if (result) {
-    //   calculateAndSetCursorPosition();
-    // }
-
     return result;
   }
 
@@ -715,14 +601,7 @@ public class InputConnectionAdaptor extends BaseInputConnection
     }
     
     if (mMonitorCursorUpdate) {
-      // Delay cursor update to allow Flutter to provide latest cursor coordinates
-      mFlutterView.postDelayed(new Runnable() {
-        @Override
-        public void run() {
-          final CursorAnchorInfo info = getCursorAnchorInfo();
-          mImm.updateCursorAnchorInfo(mFlutterView, info);
-        }
-      }, 50);
+      mImm.updateCursorAnchorInfo(mFlutterView, getCursorAnchorInfo());
     }
   }
   // -------- End: ListenableEditingState watcher implementation -------
