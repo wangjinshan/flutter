@@ -3845,9 +3845,7 @@ class EditableTextState extends State<EditableText>
   }
 
   void _openOrCloseInputConnectionIfNeeded() {
-    final bool hasKeyboardToken = widget.focusNode.consumeKeyboardToken();
-
-    if (_hasFocus && (widget.readOnly || hasKeyboardToken)) {
+    if (_hasFocus && widget.focusNode.consumeKeyboardToken()) {
       _openInputConnection();
     } else if (!_hasFocus) {
       _closeInputConnectionIfNeeded();
@@ -4218,15 +4216,6 @@ class EditableTextState extends State<EditableText>
     if (_showBlinkingCursor && _cursorTimer != null) {
       _stopCursorBlink(resetCharTicks: false);
       _startCursorBlink();
-    }
-
-    // Send caret rect to platform for IME candidate positioning (for Bluetooth keyboard support)
-    if (_textInputConnection != null && _textInputConnection!.attached) {
-      try {
-        _updateCaretRectIfNeeded();
-      } catch (e) {
-        // Silently ignore errors to avoid breaking existing functionality
-      }
     }
   }
 
@@ -4794,10 +4783,9 @@ class EditableTextState extends State<EditableText>
     if (selection == null || !selection.isValid) {
       return;
     }
-
-    final TextPosition textPosition = TextPosition(offset: selection.start);
-    final Rect localCaretRect = renderEditable.getLocalRectForCaret(textPosition);
-    _textInputConnection!.setCaretRect(localCaretRect);
+    final TextPosition currentTextPosition = TextPosition(offset: selection.start);
+    final Rect caretRect = renderEditable.getLocalRectForCaret(currentTextPosition);
+    _textInputConnection!.setCaretRect(caretRect);
   }
 
   TextDirection get _textDirection => widget.textDirection ?? Directionality.of(context);
