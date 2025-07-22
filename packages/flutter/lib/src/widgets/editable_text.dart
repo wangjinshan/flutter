@@ -4217,6 +4217,15 @@ class EditableTextState extends State<EditableText>
       _stopCursorBlink(resetCharTicks: false);
       _startCursorBlink();
     }
+
+    // Send caret rect to platform for IME candidate positioning (for Bluetooth keyboard support)
+    if (_textInputConnection != null && _textInputConnection!.attached) {
+      try {
+        _updateCaretRectIfNeeded();
+      } catch (e) {
+        // Silently ignore errors to avoid breaking existing functionality
+      }
+    }
   }
 
   // Animation configuration for scrolling the caret back on screen.
